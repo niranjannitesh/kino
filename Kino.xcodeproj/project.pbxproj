@@ -29,9 +29,22 @@
 		6DDA07B02CDA96860093CA06 /* KinoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KinoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6DDA07C52CDAD9710093CA06 /* Exceptions for "Kino" folder in "Kino" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6DDA07942CDA96850093CA06 /* Kino */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6DDA07972CDA96850093CA06 /* Kino */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6DDA07C52CDAD9710093CA06 /* Exceptions for "Kino" folder in "Kino" target */,
+			);
 			path = Kino;
 			sourceTree = "<group>";
 		};
@@ -395,6 +408,7 @@
 				DEVELOPMENT_TEAM = 44C4N75X8J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Kino/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -433,6 +447,7 @@
 				DEVELOPMENT_TEAM = 44C4N75X8J;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Kino/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
