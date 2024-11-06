@@ -8,24 +8,6 @@
 import SwiftUI
 import VLCKit
 
-struct VLCPlayerView: NSViewRepresentable {
-    let player: VLCMediaPlayer
-    
-    init(player: VLCMediaPlayer) {
-        self.player = player
-    }
-    
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        player.drawable = view
-        return view
-    }
-    
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Update logic if needed
-    }
-}
-
 struct PlayerScreen: View {
     @Bindable var viewModel: KinoViewModel
     @State private var player: VLCMediaPlayer = VLCMediaPlayer()
@@ -35,6 +17,55 @@ struct PlayerScreen: View {
     @State private var showChat = true
     @State private var isCollapsed = false
     
+    @State private var lastActivityTime = Date()
+    @State private var shouldHideControls = false
+    @State private var isMouseInView = false
+    @State private var isCursorHidden = false
+    
+    let inactivityTimer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    let inactivityThreshold: TimeInterval = 3.0
+    
+    @State private var lastSyncTime = Date()
+    @State private var syncDebounceTimer: Timer?
+    private let syncDebounceInterval: TimeInterval = 0.5
+    
+    
+    @State private var isBuffering = false
+    
+    private func showCursor() {
+        if isCursorHidden {
+            DispatchQueue.main.async {
+                NSCursor.unhide()
+                isCursorHidden = false
+            }
+        }
+    }
+    
+    private func hideCursor() {
+        if !isCursorHidden && !isCollapsed && !isDragging {
+            DispatchQueue.main.async {
+                NSCursor.hide()
+                isCursorHidden = true
+            }
+        }
+    }
+    
+    private func handleActivity() {
+        lastActivityTime = Date()
+        shouldHideControls = false
+        
+        showCursor()
+    }
+    
+    private func checkInactivity() {
+        guard isMouseInView else { return }
+        
+        let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
+        if timeSinceLastActivity >= inactivityThreshold {
+            shouldHideControls = true
+            hideCursor()
+        }
+    }
     
     private func getWindowSize() -> CGSize {
         guard let window = NSApp.windows.first else { return .zero }
@@ -45,7 +76,7 @@ struct PlayerScreen: View {
     private func calculatePanelPosition() -> CGPoint {
         let windowSize = getWindowSize()
         let width = isCollapsed ? 200.0 : 320.0
-        let height = isCollapsed ? 120.0 : 480.0
+        let height = isCollapsed ? 120.0 : 430.0
         let paddingX: CGFloat = 20
         let paddingY: CGFloat = 80
         
@@ -55,19 +86,44 @@ struct PlayerScreen: View {
         )
     }
     
-    
     var body: some View {
         GeometryReader { geometry in
-            ZStack (alignment: .topLeading) {
-                VLCPlayerView(player: player)
-                    .ignoresSafeArea()
-                    .onAppear {
-                        player.media = VLCMedia(url: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")!)
-                        player.play()  // Auto-play when view appears
+            ZStack(alignment: .topLeading) {
+                KinoVideoPlayer(
+                    player: player,
+                    shouldHideControls: shouldHideControls,
+                    viewModel: viewModel,
+                    isBuffering: $isBuffering,
+                    onStateChange: { isPlaying, position in
+                        if !viewModel.roomViewModel.isInternalStateChange {
+                            viewModel.roomViewModel.handlePlayerStateChange(
+                                state:
+                                    PlayerState(
+                                        isPlaying: isPlaying,
+                                        position: position
+                                    )
+                            )
+                        }
                     }
-                    .onDisappear {
-                        player.stop()  // Clean up when view disappears
+                )
+                .ignoresSafeArea()
+                .onAppear {
+                    player.media = VLCMedia(
+                        url: URL(
+                            string:
+                                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                        )!)
+                }
+                .onDisappear {
+                    player.stop()
+                }.onContinuousHover(coordinateSpace: .local) { phase in
+                    switch phase {
+                    case .active:
+                        handleActivity()
+                    case .ended:
+                        break
                     }
+                }
                 
                 FloatingPanel(
                     position: $panelPosition,
@@ -76,6 +132,13 @@ struct PlayerScreen: View {
                 ) {
                     ChatPanel(showChat: $showChat, isCollapsed: $isCollapsed)
                 }.zIndex(1)
+                    .onHover { hovering in
+                        // Always show cursor when hovering over chat panel
+                        if hovering && isCursorHidden {
+                            NSCursor.unhide()
+                            isCursorHidden = false
+                        }
+                    }
             }
             .background(Color.black)
             .onAppear {
@@ -84,6 +147,43 @@ struct PlayerScreen: View {
             .onChange(of: geometry.size) { oldSize, newSize in
                 panelPosition = calculatePanelPosition()
             }
+            .onKeyPress(.space) {
+                guard let window = NSApp.keyWindow,
+                      !(window.firstResponder is NSTextView),
+                      !isBuffering // Don't toggle if buffering
+                else { return .ignored }
+                
+                if player.isPlaying {
+                    player.pause()
+                } else {
+                    player.play()
+                }
+                
+                return .handled
+            }
+            .onHover { isHovering in
+                isMouseInView = isHovering
+                if isHovering {
+                    handleActivity()
+                } else {
+                    // Show cursor when mouse leaves the view
+                    if isCursorHidden {
+                        NSCursor.unhide()
+                        isCursorHidden = false
+                    }
+                }
+            }
+            .onReceive(inactivityTimer) { _ in
+                checkInactivity()
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        handleActivity()
+                    }
+            )
+        }.onAppear {
+            viewModel.roomViewModel.setPlayerDelegate(self)
         }
     }
 }
@@ -97,7 +197,10 @@ struct FloatingPanel<Content: View>: View {
     @State private var dragOffset = CGSize.zero
     @State private var opacity: Double = 1.0
     
-    init(position: Binding<CGPoint>, isDragging: Binding<Bool>, isCollapsed: Binding<Bool>, @ViewBuilder content: () -> Content) {
+    init(
+        position: Binding<CGPoint>, isDragging: Binding<Bool>, isCollapsed: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) {
         self._position = position
         self._isDragging = isDragging
         self._isCollapsed = isCollapsed
@@ -110,7 +213,7 @@ struct FloatingPanel<Content: View>: View {
         let paddingY: CGFloat = isCollapsed ? 60 : 80
         let paddingX: CGFloat = isCollapsed ? 10 : 20
         let panelWidth = isCollapsed ? 200.0 : 320.0
-        let panelHeight = isCollapsed ? 120.0 : 480.0
+        let panelHeight = isCollapsed ? 120.0 : 430.0
         
         // Constrain x position
         let maxX = frame.width - panelWidth - paddingX
@@ -139,7 +242,7 @@ struct FloatingPanel<Content: View>: View {
                 }
         }
         .shadow(color: Color.black.opacity(isDragging ? 0.3 : 0.15), radius: isDragging ? 30 : 20)
-        .frame(width: isCollapsed ? 200 : 320, height: isCollapsed ? 120 : 480)
+        .frame(width: isCollapsed ? 200 : 320, height: isCollapsed ? 120 : 430)
         .offset(x: position.x + dragOffset.width, y: position.y + dragOffset.height)
         .gesture(
             DragGesture()
@@ -168,7 +271,7 @@ struct FloatingPanel<Content: View>: View {
                         
                         // Constrain y position to screen bounds
                         let minY = 0.0
-                        let maxY = frame.height - (isCollapsed ? 120 : 480) - paddingY
+                        let maxY = frame.height - (isCollapsed ? 120 : 430) - paddingY
                         position.y = max(minY, min(maxY, position.y))
                         
                         // Dock to right edge if near
@@ -237,9 +340,13 @@ struct Participant: Identifiable {
 class ChatViewModel: ObservableObject {
     let messages = [
         ChatMessage(text: "This scene is amazing!", sender: "Sarah", time: "2m ago", isSent: false),
-        ChatMessage(text: "Yeah, the cinematography is incredible", sender: "You", time: "1m ago", isSent: true),
-        ChatMessage(text: "The score really adds to the tension", sender: "Alex", time: "Just now", isSent: false),
-        ChatMessage(text: "Definitely! This is my favorite part coming up", sender: "You", time: "Just now", isSent: true)
+        ChatMessage(
+            text: "Yeah, the cinematography is incredible", sender: "You", time: "1m ago", isSent: true),
+        ChatMessage(
+            text: "The score really adds to the tension", sender: "Alex", time: "Just now", isSent: false),
+        ChatMessage(
+            text: "Definitely! This is my favorite part coming up", sender: "You", time: "Just now",
+            isSent: true),
     ]
     
     let participants = [
@@ -265,7 +372,6 @@ struct ChatPanel: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(KinoTheme.textPrimary)
                 }
-                
                 
                 Spacer()
                 
@@ -368,7 +474,7 @@ struct MessageBubble: View {
                 
                 VStack(alignment: message.isSent ? .trailing : .leading, spacing: 4) {
                     Text(message.text)
-                        .font(.system(size: 13))
+                        .font(.custom("OpenSauceTwo-Regular", size: 13))
                         .foregroundColor(message.isSent ? .white : KinoTheme.textPrimary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -385,11 +491,11 @@ struct MessageBubble: View {
                     
                     HStack(spacing: 4) {
                         Text(message.sender)
-                            .fontWeight(.medium)
+                            .font(.custom("OpenSauceTwo-Medium", size: 11))
                         Text("•")
                         Text(message.time)
                     }
-                    .font(.system(size: 11))
+                    .font(.custom("OpenSauceTwo-Regular", size: 11))
                     .foregroundStyle(KinoTheme.textSecondary)
                 }
                 
@@ -406,7 +512,7 @@ struct CompactParticipantGrid: View {
         LazyVGrid(
             columns: [
                 GridItem(.flexible(), spacing: 4),
-                GridItem(.flexible(), spacing: 4)
+                GridItem(.flexible(), spacing: 4),
             ],
             spacing: 4
         ) {
@@ -427,7 +533,7 @@ struct CompactParticipantCell: View {
             // Video placeholder
             Rectangle()
                 .fill(Color.black)
-                .aspectRatio(16/9, contentMode: .fit)
+                .aspectRatio(16 / 9, contentMode: .fit)
                 .overlay {
                     Text(participant.avatar)
                         .font(.system(size: 14, weight: .semibold))
@@ -492,7 +598,6 @@ struct ParticipantsView: View {
     }
 }
 
-
 struct ParticipantCell: View {
     let participant: Participant
     let isCollapsed: Bool
@@ -503,8 +608,8 @@ struct ParticipantCell: View {
             ZStack {
                 Rectangle()
                     .fill(Color.black)
-                    .aspectRatio(16/9, contentMode: .fit) // Always keep 16:9
-                    .frame(width: isCollapsed ? 200 : nil) // Width for collapsed state
+                    .aspectRatio(16 / 9, contentMode: .fit)  // Always keep 16:9
+                    .frame(width: isCollapsed ? 200 : nil)  // Width for collapsed state
                 
                 Text(participant.avatar)
                     .font(.system(size: isCollapsed ? 14 : 18, weight: .semibold))
@@ -530,13 +635,16 @@ extension Color {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
+        let a: UInt64
+        let r: UInt64
+        let g: UInt64
+        let b: UInt64
         switch hex.count {
-        case 3: // RGB (12-bit)
+        case 3:  // RGB (12-bit)
             (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
+        case 6:  // RGB (24-bit)
             (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
+        case 8:  // ARGB (32-bit)
             (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
         default:
             (a, r, g, b) = (1, 1, 1, 0)
@@ -545,8 +653,34 @@ extension Color {
             .sRGB,
             red: Double(r) / 255,
             green: Double(g) / 255,
-            blue:  Double(b) / 255,
+            blue: Double(b) / 255,
             opacity: Double(a) / 255
         )
+    }
+}
+
+extension PlayerScreen: WebRTCServiceDelegate {
+    func webRTC(didReceivePlayerState state: PlayerState) {
+        DispatchQueue.main.async {
+            viewModel.roomViewModel.isInternalStateChange = true
+            
+            if state.isPlaying != player.isPlaying {
+                state.isPlaying ? player.play() : player.pause()
+            }
+            
+            let positionDiff = abs(state.position - player.position)
+            if positionDiff > 0.05 { // 5% threshold
+                player.position = state.position
+            }
+            
+            viewModel.roomViewModel.isInternalStateChange = false
+        }
+    }
+    
+    private func handleReceivedPlayerState(_ state: PlayerState) {
+        player.position = state.position
+        if state.isPlaying != player.isPlaying {
+            state.isPlaying ? player.play() : player.pause()
+        }
     }
 }

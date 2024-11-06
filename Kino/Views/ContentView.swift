@@ -8,18 +8,6 @@
 import SwiftUI
 import AVKit
 
-enum KinoScreen {
-    case home
-    case player
-}
-
-@Observable
-class KinoViewModel {
-    var currentScreen: KinoScreen = .player
-    var showNewRoomSheet = false
-    var showJoinSheet = false
-}
-
 struct ContentView: View {
     @State private var viewModel = KinoViewModel()
 

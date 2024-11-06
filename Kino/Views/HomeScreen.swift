@@ -11,16 +11,17 @@ import AVKit
 
 struct HomeScreen: View {
     @Bindable var viewModel: KinoViewModel
-
+    
     var body: some View {
         ZStack {
-#if os(macOS)
+            #if os(macOS)
             // Base background color with material
             Rectangle()
                 .fill(.background.opacity(0.5))
                 .background(VisualEffectView())
                 .ignoresSafeArea()
-#endif
+            #endif
+            
             ZStack {
                 // Background gradient blurs
                 Circle()
@@ -29,14 +30,14 @@ struct HomeScreen: View {
                     .blur(radius: 160)
                     .opacity(0.1)
                     .offset(x: 150, y: -150)
-
+                
                 Circle()
                     .fill(Color(hex: "8A7AFF"))
                     .frame(width: 300, height: 300)
                     .blur(radius: 160)
                     .opacity(0.1)
                     .offset(x: -150, y: 150)
-
+                
                 // Content
                 VStack(spacing: 48) {
                     HStack(spacing: 20) {
@@ -46,7 +47,7 @@ struct HomeScreen: View {
                             badge: "New Room",
                             action: { viewModel.showNewRoomSheet = true }
                         )
-
+                        
                         ActionCard(
                             emoji: "🎟️",
                             title: "Join Party",
@@ -59,23 +60,23 @@ struct HomeScreen: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-#if os(macOS)
-        //        .sheet(isPresented: $viewModel.showNewRoomSheet) {
-        //            NewRoomSheet(viewModel: viewModel)
-        //                .frame(width: 560, height: 620)
-        //        }
-        //        .sheet(isPresented: $viewModel.showJoinSheet) {
-        //            JoinRoomSheet(viewModel: viewModel)
-        //                .frame(width: 420, height: 480)
-        //        }
-#else
-        //        .sheet(isPresented: $viewModel.showNewRoomSheet) {
-        //            NewRoomSheet(viewModel: viewModel)
-        //        }
-        //        .sheet(isPresented: $viewModel.showJoinSheet) {
-        //            JoinRoomSheet(viewModel: viewModel)
-        //        }
-#endif
+        #if os(macOS)
+        .sheet(isPresented: $viewModel.showNewRoomSheet) {
+            NewRoomSheet(viewModel: viewModel)
+                .frame(width: 560, height: 680)
+        }
+        .sheet(isPresented: $viewModel.showJoinSheet) {
+            JoinRoomSheet(viewModel: viewModel)
+                .frame(width: 420, height: 480)
+        }
+        #else
+        .sheet(isPresented: $viewModel.showNewRoomSheet) {
+            NewRoomSheet(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.showJoinSheet) {
+            JoinRoomSheet(viewModel: viewModel)
+        }
+        #endif
     }
 }
 
