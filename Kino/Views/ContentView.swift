@@ -15,7 +15,7 @@ enum KinoScreen {
 
 @Observable
 class KinoViewModel {
-    var currentScreen: KinoScreen = .home
+    var currentScreen: KinoScreen = .player
     var showNewRoomSheet = false
     var showJoinSheet = false
 }

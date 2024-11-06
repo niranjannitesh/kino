@@ -5,28 +5,70 @@
 //  Created by Nitesh on 06/11/24.
 //
 
-import AVKit
 import SwiftUI
+import VLCKit
+
+struct VLCPlayerView: NSViewRepresentable {
+    let player: VLCMediaPlayer
+    
+    init(player: VLCMediaPlayer) {
+        self.player = player
+    }
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        player.drawable = view
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Update logic if needed
+    }
+}
 
 struct PlayerScreen: View {
     @Bindable var viewModel: KinoViewModel
-    @State private var player = AVPlayer(
-        url: Bundle.main.url(forResource: "sample", withExtension: "mp4") ??
-                    URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")!
-    )
+    @State private var player: VLCMediaPlayer = VLCMediaPlayer()
     @State private var showPanel = true
     @State private var panelPosition = CGPoint(x: 0, y: 0)
     @State private var isDragging = false
     @State private var showChat = true
     @State private var isCollapsed = false
-
-
+    
+    
+    private func getWindowSize() -> CGSize {
+        guard let window = NSApp.windows.first else { return .zero }
+        let frame = window.frame
+        return CGSize(width: frame.width, height: frame.height)
+    }
+    
+    private func calculatePanelPosition() -> CGPoint {
+        let windowSize = getWindowSize()
+        let width = isCollapsed ? 200.0 : 320.0
+        let height = isCollapsed ? 120.0 : 480.0
+        let paddingX: CGFloat = 20
+        let paddingY: CGFloat = 80
+        
+        return CGPoint(
+            x: windowSize.width - width - paddingX,
+            y: windowSize.height - height - paddingY
+        )
+    }
+    
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack (alignment: .topLeading) {
-                VideoPlayer(player: player)
+                VLCPlayerView(player: player)
                     .ignoresSafeArea()
-
+                    .onAppear {
+                        player.media = VLCMedia(url: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")!)
+                        player.play()  // Auto-play when view appears
+                    }
+                    .onDisappear {
+                        player.stop()  // Clean up when view disappears
+                    }
+                
                 FloatingPanel(
                     position: $panelPosition,
                     isDragging: $isDragging,
@@ -37,10 +79,10 @@ struct PlayerScreen: View {
             }
             .background(Color.black)
             .onAppear {
-                panelPosition = CGPoint(
-                    x: geometry.size.width - 160, // Center horizontally
-                    y: geometry.size.height - 240  // Center vertically
-                )
+                panelPosition = calculatePanelPosition()
+            }
+            .onChange(of: geometry.size) { oldSize, newSize in
+                panelPosition = calculatePanelPosition()
             }
         }
     }
@@ -51,17 +93,38 @@ struct FloatingPanel<Content: View>: View {
     @Binding var isDragging: Bool
     @Binding var isCollapsed: Bool
     let content: Content
-
+    
     @State private var dragOffset = CGSize.zero
     @State private var opacity: Double = 1.0
-
+    
     init(position: Binding<CGPoint>, isDragging: Binding<Bool>, isCollapsed: Binding<Bool>, @ViewBuilder content: () -> Content) {
         self._position = position
         self._isDragging = isDragging
         self._isCollapsed = isCollapsed
         self.content = content()
     }
-
+    
+    private func adjustPositionForBounds() {
+        guard let window = NSApp.windows.first else { return }
+        let frame = window.frame
+        let paddingY: CGFloat = isCollapsed ? 60 : 80
+        let paddingX: CGFloat = isCollapsed ? 10 : 20
+        let panelWidth = isCollapsed ? 200.0 : 320.0
+        let panelHeight = isCollapsed ? 120.0 : 480.0
+        
+        // Constrain x position
+        let maxX = frame.width - panelWidth - paddingX
+        position.x = min(maxX, position.x)
+        
+        // Constrain y position
+        let maxY = frame.height - panelHeight - paddingY
+        position.y = min(maxY, position.y)
+        
+        // Ensure panel is not positioned above or to the left of the window
+        position.x = max(paddingX, position.x)
+        position.y = max(0, position.y)
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             content
@@ -69,9 +132,7 @@ struct FloatingPanel<Content: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 8 : 16))
         .background {
             RoundedRectangle(cornerRadius: isCollapsed ? 8 : 16)
-                .fill(isCollapsed ?
-                      KinoTheme.bgSecondary.opacity(0.6) :
-                        KinoTheme.bgSecondary)
+                .fill(.ultraThinMaterial)
                 .overlay {
                     RoundedRectangle(cornerRadius: isCollapsed ? 8 : 16)
                         .strokeBorder(KinoTheme.surfaceBorder.opacity(isCollapsed ? 0.3 : 1))
@@ -91,7 +152,7 @@ struct FloatingPanel<Content: View>: View {
                     position.x += value.translation.width
                     position.y += value.translation.height
                     dragOffset = .zero
-
+                    
                     // Auto-dock to edges if near
                     if let window = NSApp.windows.first {
                         let screen = window.screen ?? NSScreen.main
@@ -99,17 +160,17 @@ struct FloatingPanel<Content: View>: View {
                         let paddingY: CGFloat = isCollapsed ? 60 : 80
                         let paddingX: CGFloat = isCollapsed ? 10 : 20
                         let panelWidth = isCollapsed ? 200.0 : 320.0
-
+                        
                         // Constrain x position to screen bounds
                         let minX = paddingX
                         let maxX = frame.width - panelWidth - paddingX
                         position.x = max(minX, min(maxX, position.x))
-
+                        
                         // Constrain y position to screen bounds
                         let minY = 0.0
                         let maxY = frame.height - (isCollapsed ? 120 : 480) - paddingY
                         position.y = max(minY, min(maxY, position.y))
-
+                        
                         // Dock to right edge if near
                         if position.x > frame.width - 100 {
                             withAnimation(.spring(response: 0.3)) {
@@ -134,12 +195,11 @@ struct FloatingPanel<Content: View>: View {
             }
         )
         .onChange(of: isCollapsed) { _, collapsed in
-            // Adjust position when collapsing to keep panel visible
-            if collapsed {
-                if position.x + 160 > NSScreen.main?.frame.width ?? 0 {
-                    position.x = (NSScreen.main?.frame.width ?? 0) - 180
-                }
+            
+            withAnimation(.spring(response: 0.3)) {
+                adjustPositionForBounds()
             }
+            
         }
     }
 }
@@ -147,7 +207,7 @@ struct FloatingPanel<Content: View>: View {
 struct PanelTab: View {
     let icon: String
     let isSelected: Bool
-
+    
     var body: some View {
         Text(icon)
             .font(.system(size: 14))
@@ -181,7 +241,7 @@ class ChatViewModel: ObservableObject {
         ChatMessage(text: "The score really adds to the tension", sender: "Alex", time: "Just now", isSent: false),
         ChatMessage(text: "Definitely! This is my favorite part coming up", sender: "You", time: "Just now", isSent: true)
     ]
-
+    
     let participants = [
         Participant(name: "Nitesh", status: "Host", avatar: "N"),
         Participant(name: "Kriti", status: "Watching", avatar: "K"),
@@ -194,28 +254,28 @@ struct ChatPanel: View {
     @StateObject private var viewModel = ChatViewModel()
     @State private var message = ""
     @State private var isHovering = false
-
+    
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
-
+                
                 if !isCollapsed {
                     Text("Room: Movie Night")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(KinoTheme.textPrimary)
                 }
-
-
+                
+                
                 Spacer()
-
+                
                 HStack(spacing: 8) {
                     if !isCollapsed {
                         // Chat/Participants toggle
                         HStack(spacing: 2) {
                             PanelTab(icon: "👀", isSelected: !showChat)
                                 .onTapGesture { withAnimation { showChat = false } }
-
+                            
                             PanelTab(icon: "💬", isSelected: showChat)
                                 .onTapGesture { withAnimation { showChat = true } }
                         }
@@ -223,7 +283,7 @@ struct ChatPanel: View {
                         .background(Color.black.opacity(0.2))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-
+                    
                     // Collapse button
                     Button(action: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -242,7 +302,7 @@ struct ChatPanel: View {
             .padding(.horizontal, isCollapsed ? 4 : 12)
             .padding(.vertical, isCollapsed ? 4 : 12)
             .background(KinoTheme.bgTertiary)
-
+            
             if isCollapsed {
                 // Compact grid of participant videos
                 CompactParticipantGrid(participants: viewModel.participants)
@@ -260,7 +320,7 @@ struct ChatPanel: View {
 struct ChatView: View {
     let messages: [ChatMessage]
     @State private var message = ""
-
+    
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -271,7 +331,7 @@ struct ChatView: View {
                 }
                 .padding(16)
             }
-
+            
             // Input
             HStack(spacing: 8) {
                 TextField("Type a message...", text: $message)
@@ -281,7 +341,7 @@ struct ChatView: View {
                     .padding(.vertical, 8)
                     .background(KinoTheme.messageBg)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-
+                
                 Button(action: {}) {
                     Text("↑")
                         .foregroundColor(.white)
@@ -300,12 +360,12 @@ struct ChatView: View {
 
 struct MessageBubble: View {
     let message: ChatMessage
-
+    
     var body: some View {
         VStack(alignment: message.isSent ? .trailing : .leading) {
             HStack {
                 if message.isSent { Spacer() }
-
+                
                 VStack(alignment: message.isSent ? .trailing : .leading, spacing: 4) {
                     Text(message.text)
                         .font(.system(size: 13))
@@ -322,7 +382,7 @@ struct MessageBubble: View {
                                 topTrailingRadius: message.isSent ? 12 : 12
                             )
                         )
-
+                    
                     HStack(spacing: 4) {
                         Text(message.sender)
                             .fontWeight(.medium)
@@ -332,7 +392,7 @@ struct MessageBubble: View {
                     .font(.system(size: 11))
                     .foregroundStyle(KinoTheme.textSecondary)
                 }
-
+                
                 if !message.isSent { Spacer() }
             }
         }
@@ -341,7 +401,7 @@ struct MessageBubble: View {
 
 struct CompactParticipantGrid: View {
     let participants: [Participant]
-
+    
     var body: some View {
         LazyVGrid(
             columns: [
@@ -361,7 +421,7 @@ struct CompactParticipantGrid: View {
 struct CompactParticipantCell: View {
     let participant: Participant
     @State private var isHovering = false
-
+    
     var body: some View {
         ZStack(alignment: .topLeading) {
             // Video placeholder
@@ -373,7 +433,7 @@ struct CompactParticipantCell: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(KinoTheme.textPrimary)
                 }
-
+            
             // Name badge that shows on hover
             if isHovering {
                 Text(participant.name)
@@ -386,7 +446,7 @@ struct CompactParticipantCell: View {
                     .padding(4)
                     .transition(.opacity)
             }
-
+            
             // Status indicator
             Circle()
                 .fill(participant.status == "Host" ? KinoTheme.accent : Color.green)
@@ -405,7 +465,7 @@ struct CompactParticipantCell: View {
 struct ParticipantsView: View {
     let participants: [Participant]
     let isCollapsed: Bool
-
+    
     var body: some View {
         if isCollapsed {
             // Horizontal layout when collapsed
@@ -436,7 +496,7 @@ struct ParticipantsView: View {
 struct ParticipantCell: View {
     let participant: Participant
     let isCollapsed: Bool
-
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Video area - maintain 16:9 ratio even when collapsed
@@ -445,7 +505,7 @@ struct ParticipantCell: View {
                     .fill(Color.black)
                     .aspectRatio(16/9, contentMode: .fit) // Always keep 16:9
                     .frame(width: isCollapsed ? 200 : nil) // Width for collapsed state
-
+                
                 Text(participant.avatar)
                     .font(.system(size: isCollapsed ? 14 : 18, weight: .semibold))
                     .foregroundStyle(KinoTheme.textPrimary)

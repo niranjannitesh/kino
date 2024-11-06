@@ -13,7 +13,7 @@ import SwiftUI
 struct KinoApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView().preferredColorScheme(.dark)
         }
 #if os(macOS)
         .windowStyle(.hiddenTitleBar)
