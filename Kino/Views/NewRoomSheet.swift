@@ -10,29 +10,22 @@ import SwiftUI
 struct NewRoomSheet: View {
     @Bindable var viewModel: KinoViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var roomName: String = ""
     @State private var displayName: String = ""
-    @State private var isCameraEnabled = true
-    @State private var isMicEnabled = true
-    @State private var isChatEnabled = true
-    @State private var isPrivateRoom = false
+
     @State private var isCreatingRoom = false
     @State private var showJoinButton = false
     
     private func handleCreateRoom() {
+        guard !displayName.isEmpty else { return }
+        
         isCreatingRoom = true
         showJoinButton = false
-        
-        // Save the input values
-        viewModel.roomName = roomName
-        viewModel.displayName = displayName
-        
-        // Create the room
+
         Task {
-            await viewModel.roomViewModel.createRoom()
+            await viewModel.roomViewModel.createRoom(displayName: displayName)
             await MainActor.run {
                 isCreatingRoom = false
-                // Show the join button if we have a room code
+            
                 if !viewModel.roomViewModel.roomCode.isEmpty {
                     withAnimation(.spring(response: 0.3)) {
                         showJoinButton = true
@@ -71,50 +64,14 @@ struct NewRoomSheet: View {
 
             ScrollView {
                 VStack(spacing: 24) {
-                    // Input Fields
                     VStack(alignment: .leading, spacing: 20) {
-                        InputField(
-                            label: "Room Name",
-                            placeholder: "Movie Night",
-                            text: $roomName
-                        )
-                        
                         InputField(
                             label: "Your Display Name",
                             placeholder: "Enter your name",
                             text: $displayName
                         )
                     }
-                    
-                    // Video Select
-                    Button(action: {}) {
-                        VStack(spacing: 16) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 24))
-                                .frame(width: 48, height: 48)
-                                .background(KinoTheme.accent.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            
-                            VStack(spacing: 8) {
-                                Text("Choose a video file")
-                                    .font(.custom("OpenSauceTwo-Medium", size: 14))
-                                    .foregroundStyle(KinoTheme.textPrimary)
-                                
-                                Text("Drop file here or click to browse")
-                                    .font(.custom("OpenSauceTwo-Regular", size: 13))
-                                    .foregroundStyle(KinoTheme.textSecondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                        .background {
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                .foregroundStyle(KinoTheme.surfaceBorder)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    
+            
                     // Room Code
                     VStack(spacing: 8) {
                 Text("Room Code")

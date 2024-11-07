@@ -9,6 +9,10 @@
 	</dict>
   <key>LSMultipleInstancesProhibited</key>
   <false/>
+  <key>NSCameraUsageDescription</key>
+  <string>Camera access is needed for video chat with other participants</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Microphone access is needed for voice chat with other participants</string>
   <key>UTImportedTypeDeclarations</key>
   <array>
       <dict>

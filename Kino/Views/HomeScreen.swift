@@ -1,5 +1,5 @@
 //
-//  HomeScreen 2.swift
+//  HomeScreen.swift
 //  Kino
 //
 //  Created by Nitesh on 06/11/24.
@@ -15,7 +15,6 @@ struct HomeScreen: View {
     var body: some View {
         ZStack {
             #if os(macOS)
-            // Base background color with material
             Rectangle()
                 .fill(.background.opacity(0.5))
                 .background(VisualEffectView())
@@ -23,7 +22,6 @@ struct HomeScreen: View {
             #endif
             
             ZStack {
-                // Background gradient blurs
                 Circle()
                     .fill(KinoTheme.accent)
                     .frame(width: 300, height: 300)
@@ -38,7 +36,6 @@ struct HomeScreen: View {
                     .opacity(0.1)
                     .offset(x: -150, y: 150)
                 
-                // Content
                 VStack(spacing: 48) {
                     HStack(spacing: 20) {
                         ActionCard(
@@ -63,11 +60,9 @@ struct HomeScreen: View {
         #if os(macOS)
         .sheet(isPresented: $viewModel.showNewRoomSheet) {
             NewRoomSheet(viewModel: viewModel)
-                .frame(width: 560, height: 680)
         }
         .sheet(isPresented: $viewModel.showJoinSheet) {
             JoinRoomSheet(viewModel: viewModel)
-                .frame(width: 420, height: 480)
         }
         #else
         .sheet(isPresented: $viewModel.showNewRoomSheet) {
@@ -92,7 +87,7 @@ struct ActionCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack (alignment: .top) {
-                    // Icon
+
                     Text(emoji)
                         .font(.custom("OpenSauceTwo-Black", size: 32))
                         .frame(width: 48, height: 48)
@@ -101,9 +96,7 @@ struct ActionCard: View {
 
                     Spacer()
 
-                    // Badge
                     Text(badge)
-                    //                        .font(.system(size: 12, weight: .medium))
                         .font(.custom("OpenSauceTwo-Medium", size: 12))
                         .foregroundColor(KinoTheme.accent)
                         .padding(.horizontal, 12)
@@ -117,7 +110,6 @@ struct ActionCard: View {
                 }
 
                 Text(title)
-                //                    .font(.system(size: 15, weight: .semibold))
                     .font(.custom("OpenSauceTwo-Bold", size: 15))
                     .foregroundStyle(KinoTheme.textPrimary)
             }
@@ -134,7 +126,6 @@ struct ActionCard: View {
                     }
             }
             .shadow(color: KinoTheme.accent.opacity(isHovering ? 0.1 : 0), radius: 20)
-            //            .scaleEffect(isHovering ? 1.02 : 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovering)
 
         }

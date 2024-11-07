@@ -7,6 +7,7 @@
 
 import SwiftUI
 import VLCKit
+import WebRTC
 
 struct PlayerScreen: View {
     @Bindable var viewModel: KinoViewModel
@@ -131,7 +132,7 @@ struct PlayerScreen: View {
                     isDragging: $isDragging,
                     isCollapsed: $isCollapsed
                 ) {
-                    ChatPanel(showChat: $showChat, isCollapsed: $isCollapsed)
+                    ChatPanel(showChat: $showChat, isCollapsed: $isCollapsed, viewModel: viewModel.chatViewModel)
                 }.zIndex(1)
                     .onHover { hovering in
                         // Always show cursor when hovering over chat panel
@@ -254,22 +255,48 @@ extension PlayerScreen: WebRTCServiceDelegate {
         viewModel.roomViewModel.fileStreamManager.handleFileStream(message)
     }
     
-    private func handleReceivedPlayerState(_ state: PlayerState) {
-        // Don't sync while buffering to prevent jumping
-        guard !isBuffering else { return }
-        
-        let positionDiff = abs(state.position - player.position)
-        
-        // Only sync position if difference is significant
-        if positionDiff > syncThreshold {
-            // Store last synced position
-            lastSyncPosition = state.position
-            player.position = state.position
-        }
-        
-        // Always sync play/pause state
-        if state.isPlaying != player.isPlaying {
-            state.isPlaying ? player.play() : player.pause()
+    func webRTC(didReceiveVideoTrack track: RTCVideoTrack, forParticipant id: UUID) {
+        viewModel.chatViewModel.updateParticipantVideo(id: id, track: track)
+    }
+    
+    func webRTC(didRemoveVideoTrack track: RTCVideoTrack, forParticipant id: UUID) {
+        viewModel.chatViewModel.updateParticipantVideo(id: id, track: nil)
+    }
+    
+    func webRTC(didReceiveAudioTrack track: RTCAudioTrack, forParticipant id: UUID) {
+        // Update participant's audio state
+        if let index = viewModel.chatViewModel.participants.firstIndex(where: { $0.id == id }) {
+            viewModel.chatViewModel.participants[index].isAudioEnabled = true
         }
     }
+    
+    func webRTC(didRemoveAudioTrack track: RTCAudioTrack, forParticipant id: UUID) {
+        // Update participant's audio state
+        if let index = viewModel.chatViewModel.participants.firstIndex(where: { $0.id == id }) {
+            viewModel.chatViewModel.participants[index].isAudioEnabled = false
+        }
+    }
+    
+    func webRTC(didReceiveParticipantInfo participant: Participant) {
+        viewModel.chatViewModel.updateOrAddParticipant(participant)
+    }
+    
+//    private func handleReceivedPlayerState(_ state: PlayerState) {
+//        // Don't sync while buffering to prevent jumping
+//        guard !isBuffering else { return }
+//        
+//        let positionDiff = abs(state.position - player.position)
+//        
+//        // Only sync position if difference is significant
+//        if positionDiff > syncThreshold {
+//            // Store last synced position
+//            lastSyncPosition = state.position
+//            player.position = state.position
+//        }
+//        
+//        // Always sync play/pause state
+//        if state.isPlaying != player.isPlaying {
+//            state.isPlaying ? player.play() : player.pause()
+//        }
+//    }
 }

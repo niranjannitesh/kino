@@ -8,6 +8,19 @@
 import Foundation
 import WebRTC
 
+struct ParticipantInfo: Codable {
+    let id: UUID
+    let name: String
+    let isHost: Bool
+}
+
+struct TrackInfo: Codable {
+    let participantId: UUID
+    let videoTrackId: String
+    let audioTrackId: String
+    let participantInfo: ParticipantInfo 
+}
+
 // MARK: - Signaling Models
 struct SignalingMessage: Codable {
     enum MessageType: String, Codable {
@@ -16,6 +29,7 @@ struct SignalingMessage: Codable {
         case iceCandidate
         case join
         case leave
+        case trackInfo
     }
     
     let type: MessageType
@@ -27,6 +41,8 @@ enum SignalingPayload: Codable {
     case sdp(SDPMessage)
     case ice(ICEMessage)
     case plain(String)
+    case trackInfo(TrackInfo)
+
     
     private enum CodingKeys: String, CodingKey {
         case type, data
@@ -43,6 +59,9 @@ enum SignalingPayload: Codable {
         case "ice":
             let ice = try container.decode(ICEMessage.self, forKey: .data)
             self = .ice(ice)
+        case "trackInfo":
+            let trackInfo = try container.decode(TrackInfo.self, forKey: .data)
+            self = .trackInfo(trackInfo)
         default:
             let string = try container.decode(String.self, forKey: .data)
             self = .plain(string)
@@ -59,6 +78,9 @@ enum SignalingPayload: Codable {
         case .ice(let ice):
             try container.encode("ice", forKey: .type)
             try container.encode(ice, forKey: .data)
+        case .trackInfo(let trackInfo):
+            try container.encode("trackInfo", forKey: .type)
+            try container.encode(trackInfo, forKey: .data)
         case .plain(let string):
             try container.encode("plain", forKey: .type)
             try container.encode(string, forKey: .data)
@@ -190,8 +212,33 @@ class SignalingService {
                     return
                 }
                 
-                // Handle forwarded offer/ice messages
-                if type == "offer" {
+                if type == "trackInfo" {
+                    if let payload = json["payload"] as? [String: Any],
+                       let trackData = payload["data"] as? [String: Any],
+                       let participantId = UUID(uuidString: trackData["participantId"] as? String ?? ""),
+                       let videoTrackId = trackData["videoTrackId"] as? String,
+                       let audioTrackId = trackData["audioTrackId"] as? String,
+                       let participantData = trackData["participantInfo"] as? [String: Any],
+                       let name = participantData["name"] as? String,
+                       let isHost = participantData["isHost"] as? Bool {
+                        
+                        RTCLogger.shared.log("Signaling", "Processing forwarded track info")
+                        let participantInfo = ParticipantInfo(
+                                                id: participantId,
+                                                name: name,
+                                                isHost: isHost
+                                            )
+                        
+                        let trackInfo = TrackInfo(
+                            participantId: participantId,
+                            videoTrackId: videoTrackId,
+                            audioTrackId: audioTrackId,
+                            participantInfo: participantInfo
+                        )
+                        
+                        delegate?.signaling(didReceiveTrackInfo: trackInfo, for: currentRoomCode!)
+                    }
+                } else if type == "offer" {
                     if let payload = json["payload"] as? [String: Any],
                        let sdpData = payload["data"] as? [String: Any],
                        let sdp = sdpData["sdp"] as? String
@@ -259,4 +306,5 @@ protocol SignalingServiceDelegate: AnyObject {
     func signaling(didReceiveAnswer: SDPMessage, for roomCode: String)
     func signaling(didReceiveIceCandidate: ICEMessage, for roomCode: String)
     func signaling(didReceiveJoin: String, for roomCode: String)
+    func signaling(didReceiveTrackInfo: TrackInfo, for roomCode: String)
 }

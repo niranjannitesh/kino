@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import WebRTC
 
 struct FloatingPanel<Content: View>: View {
     @Binding var position: CGPoint
@@ -140,46 +141,12 @@ struct PanelTab: View {
     }
 }
 
-// Mock data structure
-struct ChatMessage: Identifiable {
-    let id = UUID()
-    let text: String
-    let sender: String
-    let time: String
-    let isSent: Bool
-}
-
-struct Participant: Identifiable {
-    let id = UUID()
-    let name: String
-    let status: String
-    let avatar: String
-}
-
-class ChatViewModel: ObservableObject {
-    let messages = [
-        ChatMessage(text: "This scene is amazing!", sender: "Sarah", time: "2m ago", isSent: false),
-        ChatMessage(
-            text: "Yeah, the cinematography is incredible", sender: "You", time: "1m ago", isSent: true),
-        ChatMessage(
-            text: "The score really adds to the tension", sender: "Alex", time: "Just now", isSent: false),
-        ChatMessage(
-            text: "Definitely! This is my favorite part coming up", sender: "You", time: "Just now",
-            isSent: true),
-    ]
-    
-    let participants = [
-        Participant(name: "Nitesh", status: "Host", avatar: "N"),
-        Participant(name: "Kriti", status: "Watching", avatar: "K"),
-    ]
-}
-
 struct ChatPanel: View {
     @Binding var showChat: Bool
     @Binding var isCollapsed: Bool
-    @StateObject private var viewModel = ChatViewModel()
     @State private var message = ""
     @State private var isHovering = false
+    @Bindable var viewModel: ChatViewModel
     
     var body: some View {
         VStack(spacing: 0) {
@@ -350,14 +317,20 @@ struct CompactParticipantCell: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             // Video placeholder
-            Rectangle()
-                .fill(Color.black)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .overlay {
-                    Text(participant.avatar)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(KinoTheme.textPrimary)
-                }
+            if let videoTrack = participant.videoTrack {
+                RTCVideoView(track: videoTrack)
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .background(Color.black)
+            } else {
+                Rectangle()
+                    .fill(Color.black)
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .overlay {
+                        Text(participant.avatar)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(KinoTheme.textPrimary)
+                    }
+            }
             
             // Name badge that shows on hover
             if isHovering {
@@ -423,27 +396,39 @@ struct ParticipantCell: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Video area - maintain 16:9 ratio even when collapsed
             ZStack {
-                Rectangle()
-                    .fill(Color.black)
-                    .aspectRatio(16 / 9, contentMode: .fit)  // Always keep 16:9
-                    .frame(width: isCollapsed ? 200 : nil)  // Width for collapsed state
-                
-                Text(participant.avatar)
-                    .font(.system(size: isCollapsed ? 14 : 18, weight: .semibold))
-                    .foregroundStyle(KinoTheme.textPrimary)
+                if let videoTrack = participant.videoTrack {
+                    RTCVideoView(track: videoTrack, isMirrored: participant.isLocal)
+                        .aspectRatio(16/9, contentMode: .fit)
+//                        .frame(width: isCollapsed ? 200 : nil)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.black)
+                } else {
+                    Rectangle()
+                        .fill(Color.black)
+                        .aspectRatio(16/9, contentMode: .fit)
+                        .frame(width: isCollapsed ? 200 : nil)
+                    
+                    Text(participant.avatar)
+                        .font(.system(size: isCollapsed ? 14 : 18, weight: .semibold))
+                        .foregroundStyle(KinoTheme.textPrimary)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .topLeading) {
-                Text(participant.name)
-                    .font(.system(size: isCollapsed ? 10 : 12, weight: .medium))
-                    .foregroundStyle(KinoTheme.textPrimary)
-                    .padding(.horizontal, isCollapsed ? 4 : 8)
-                    .padding(.vertical, isCollapsed ? 2 : 4)
-                    .background(.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .padding(isCollapsed ? 4 : 8)
+                HStack(spacing: 4) {
+                    Text(participant.name)
+                        .font(.system(size: isCollapsed ? 10 : 12, weight: .medium))
+                    
+                    Image(systemName: participant.isAudioEnabled ? "mic" : "mic.slash")
+                        .font(.system(size: isCollapsed ? 8 : 10))
+                }
+                .foregroundStyle(KinoTheme.textPrimary)
+                .padding(.horizontal, isCollapsed ? 4 : 8)
+                .padding(.vertical, isCollapsed ? 2 : 4)
+                .background(.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(isCollapsed ? 4 : 8)
             }
         }
     }
