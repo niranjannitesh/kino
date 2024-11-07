@@ -8,13 +8,66 @@
 import SwiftUI
 import VLCKit
 
+
+class VLCPlayerStateManager: NSObject, VLCMediaPlayerDelegate {
+    let onStateChange: (Bool, Float) -> Void
+    let onBufferingChange: (Bool) -> Void
+    
+    init(onStateChange: @escaping (Bool, Float) -> Void,
+         onBufferingChange: @escaping (Bool) -> Void) {
+        self.onStateChange = onStateChange
+        self.onBufferingChange = onBufferingChange
+        super.init()
+    }
+    
+    
+    func mediaPlayerStateChanged(_ notification: Notification) {
+        guard let player = notification.object as? VLCMediaPlayer else { return }
+        
+        // More precise buffering state detection
+        let isBuffering = player.state == .buffering || player.state == .opening
+        onBufferingChange(isBuffering)
+        
+        // Only send state updates when in a stable state
+        if player.state != .buffering && player.state != .opening {
+            onStateChange(player.isPlaying, player.position)
+        }
+    }
+    
+    //    func mediaPlayerStateChanged(_ notification: Notification) {
+    //        guard let player = notification.object as? VLCMediaPlayer else { return }
+    //        if player.state != .buffering {
+    //            onStateChange(player.isPlaying, player.position)
+    //        }
+    //
+    //        if (player.state == .buffering || player.state == .opening) {
+    //            onBufferingChange(true)
+    //        } else if player.state == .playing || player.state == .paused {
+    //            onBufferingChange(false)
+    //        }
+    //    }
+    //
+    //    // This captures position changes during seeking
+    //    func mediaPlayerPositionChanged(_ notification: Notification) {
+    //        guard let player = notification.object as? VLCMediaPlayer else { return }
+    //        onStateChange(player.isPlaying, player.position)
+    //    }
+    //
+    //    // This captures time changes during playback
+    //    func mediaPlayerTimeChanged(_ notification: Notification) {
+    //        guard let player = notification.object as? VLCMediaPlayer else { return }
+    //        onStateChange(player.isPlaying, player.position)
+    //    }
+}
+
 struct KinoVideoPlayer: View {
     let player: VLCMediaPlayer
     let shouldHideControls: Bool
     @Bindable var viewModel: KinoViewModel
     @Binding var isBuffering: Bool
     let onStateChange: (Bool, Float) -> Void
-
+    
+    @State private var stateManager: VLCPlayerStateManager?
     
     private let bufferingDebounceInterval: TimeInterval = 0.5
     @State private var bufferingDebounceTimer: Timer?
@@ -26,17 +79,19 @@ struct KinoVideoPlayer: View {
                 VLCPlayerView(player: player)
                     .ignoresSafeArea()
                     .onAppear {
-                        // Set up buffering detection
-                        NotificationCenter.default.addObserver(
-                            forName: NSNotification.Name(rawValue: "VLCMediaPlayerStateChanged"),
-                            object: player,
-                            queue: .main
-                        ) { notification in
-                            handlePlayerStateChange()
-                        }
+                        let manager = VLCPlayerStateManager(
+                            onStateChange: { isPlaying, position in
+                                onStateChange(isPlaying, position)
+                            },
+                            onBufferingChange: { buffering in
+                                isBuffering = buffering
+                            }
+                        )
+                        player.delegate = manager
+                        stateManager = manager
                     }
                 
-                if isBuffering {
+                if isBuffering && player.isPlaying {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .scaleEffect(1.5)
@@ -56,10 +111,7 @@ struct KinoVideoPlayer: View {
         }
     }
     
-    private func handlePlayerStateChange() {
-        print("[VLC] Player State \(player.state) at \(player.position)")
-        onStateChange(player.isPlaying, player.position)
-    }
+    
     
 }
 
@@ -70,6 +122,7 @@ struct VideoControls: View {
     @State private var volume: Int = 100
     @State private var timeString = "00:00 / 00:00"
     @Bindable var viewModel: KinoViewModel
+    
     
     
     // Timer just for UI updates, not for sync
@@ -117,6 +170,14 @@ struct VideoControls: View {
                             set: { newValue in
                                 progress = newValue
                                 player.position = newValue
+                                
+                                viewModel.roomViewModel.handlePlayerStateChange(
+                                    state: PlayerState(
+                                        isPlaying: player.isPlaying,
+                                        position: newValue,
+                                        isSeekEvent: true
+                                    )
+                                )
                             }
                         ), in: 0...1
                     )

@@ -491,11 +491,6 @@ extension WebRTCService: SignalingServiceDelegate {
     }
 }
 
-struct PlayerState: Codable {
-    let isPlaying: Bool
-    let position: Float
-}
-
 // MARK: - Custom Errors
 enum WebRTCError: Error {
     case peerConnectionFailed

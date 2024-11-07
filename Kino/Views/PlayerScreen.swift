@@ -29,6 +29,9 @@ struct PlayerScreen: View {
     @State private var syncDebounceTimer: Timer?
     private let syncDebounceInterval: TimeInterval = 0.5
     
+    @State private var lastSyncPosition: Float = 0
+    @State private var syncThreshold: Float = 0.05 // 5% threshold
+    
     
     @State private var isBuffering = false
     
@@ -95,24 +98,43 @@ struct PlayerScreen: View {
                     viewModel: viewModel,
                     isBuffering: $isBuffering,
                     onStateChange: { isPlaying, position in
+                        guard !isBuffering else { return }
+                        
                         if !viewModel.roomViewModel.isInternalStateChange {
-                            viewModel.roomViewModel.handlePlayerStateChange(
-                                state:
-                                    PlayerState(
+                            // Debounce sync updates
+                            syncDebounceTimer?.invalidate()
+                            syncDebounceTimer = Timer.scheduledTimer(withTimeInterval: syncDebounceInterval, repeats: false) { _ in
+                                viewModel.roomViewModel.handlePlayerStateChange(
+                                    state: PlayerState(
                                         isPlaying: isPlaying,
                                         position: position
                                     )
-                            )
+                                )
+                            }
                         }
                     }
                 )
                 .ignoresSafeArea()
                 .onAppear {
-                    player.media = VLCMedia(
+                    let media = VLCMedia(
                         url: URL(
                             string:
                                 "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
                         )!)
+                    media.addOptions([
+                       "network-caching": "3000",
+                       "live-caching": "3000",
+                       "file-caching": "3000",
+                       "clock-jitter": "0",
+                       "clock-synchro": "0",
+                       "prefetch-buffer-size": "1048576", // 1MB prefetch buffer
+                       "sout-mux-caching": "3000",
+                       "start-paused": "1" // Start loading but paused
+                    ])
+                    
+                    player.media = media
+                    player.play()
+                    player.pause()
                 }
                 .onDisappear {
                     player.stop()
@@ -664,13 +686,24 @@ extension PlayerScreen: WebRTCServiceDelegate {
         DispatchQueue.main.async {
             viewModel.roomViewModel.isInternalStateChange = true
             
-            if state.isPlaying != player.isPlaying {
-                state.isPlaying ? player.play() : player.pause()
-            }
-            
-            let positionDiff = abs(state.position - player.position)
-            if positionDiff > 0.05 { // 5% threshold
+            if state.isSeekEvent {
+                // For seek events, always sync position immediately
                 player.position = state.position
+                
+                // Update play state after seek
+                if state.isPlaying != player.isPlaying {
+                    state.isPlaying ? player.play() : player.pause()
+                }
+            } else {
+                // For regular playback, use existing sync logic
+                let positionDiff = abs(state.position - player.position)
+                if positionDiff > 0.05 { // 5% threshold
+                    player.position = state.position
+                }
+                
+                if state.isPlaying != player.isPlaying {
+                    state.isPlaying ? player.play() : player.pause()
+                }
             }
             
             viewModel.roomViewModel.isInternalStateChange = false
@@ -678,7 +711,19 @@ extension PlayerScreen: WebRTCServiceDelegate {
     }
     
     private func handleReceivedPlayerState(_ state: PlayerState) {
-        player.position = state.position
+        // Don't sync while buffering to prevent jumping
+        guard !isBuffering else { return }
+        
+        let positionDiff = abs(state.position - player.position)
+        
+        // Only sync position if difference is significant
+        if positionDiff > syncThreshold {
+            // Store last synced position
+            lastSyncPosition = state.position
+            player.position = state.position
+        }
+        
+        // Always sync play/pause state
         if state.isPlaying != player.isPlaying {
             state.isPlaying ? player.play() : player.pause()
         }

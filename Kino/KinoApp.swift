@@ -8,6 +8,19 @@
 import SwiftUI
 import VLCKit
 
+
+struct PlayerState: Codable {
+    let isPlaying: Bool
+    let position: Float
+    let isSeekEvent: Bool
+    
+    init(isPlaying: Bool, position: Float, isSeekEvent: Bool = false) {
+        self.isPlaying = isPlaying
+        self.position = position
+        self.isSeekEvent = isSeekEvent
+    }
+}
+
 enum KinoScreen {
     case home
     case player
@@ -54,8 +67,14 @@ class RoomViewModel {
     func handlePlayerStateChange(state: PlayerState) {
         guard !isInternalStateChange else { return }
         let currentTime = Date().timeIntervalSince1970
-        webRTCService.sendPlayerState(state)
-        lastSyncTime = currentTime
+        
+        // Only send updates if:
+        // 1. It's a seek event (immediate sync needed)
+        // 2. Or enough time has passed since last sync
+        if state.isSeekEvent || (currentTime - lastSyncTime) >= 0.5 {
+            webRTCService.sendPlayerState(state)
+            lastSyncTime = currentTime
+        }
     }
 
     func setPlayerDelegate(_ delegate: WebRTCServiceDelegate) {
