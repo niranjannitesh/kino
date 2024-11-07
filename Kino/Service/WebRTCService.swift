@@ -7,39 +7,7 @@
 import OSLog
 import WebRTC
 
-// Custom logger for WebRTC events
-class RTCLogger {
-    static let shared = RTCLogger()
-    private let logger = Logger(subsystem: "com.kino.app", category: "WebRTC")
-//    private let fileLogger: FileHandle?
-    
-//    init() {
-//        // Create unique log file for this instance
-//        let fileName = "kino_webrtc_\(UUID().uuidString).log"
-//        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-//        let logPath = documentsPath.appendingPathComponent(fileName)
-//        
-//        FileManager.default.createFile(atPath: logPath.path, contents: nil)
-//        fileLogger = try? FileHandle(forWritingTo: logPath)
-//        
-//        log("Logger", "Logging to file: \(logPath.path)")
-//    }
-    
-    func log(_ type: String, _ message: String) {
-//        let timestamp = ISO8601DateFormatter().string(from: Date())
-//        let logMessage = "[\(timestamp)] [\(type)] \(message)\n"
-        
-#if DEBUG
-        logger.debug("[\(type)] \(message)")
-#endif
-        
-//        fileLogger?.write(logMessage.data(using: .utf8) ?? Data())
-    }
-    
-//    deinit {
-//        fileLogger?.closeFile()
-//    }
-}
+
 
 class WebRTCService: NSObject, ObservableObject {
     private let instanceId = UUID().uuidString
@@ -48,6 +16,8 @@ class WebRTCService: NSObject, ObservableObject {
     private let config: RTCConfiguration
     private var peerConnection: RTCPeerConnection?
     private var dataChannel: RTCDataChannel?
+    
+    private var fileChannel: RTCDataChannel?
     
     private var pendingICECandidates: [RTCIceCandidate] = []
     private var isInitiator = false
@@ -144,7 +114,6 @@ class WebRTCService: NSObject, ObservableObject {
         )
         
         if isInitiator {
-            RTCLogger.shared.log("Setup", "Creating data channel as initiator")
             let dataChannelConfig = RTCDataChannelConfiguration()
             dataChannelConfig.isOrdered = true
             dataChannelConfig.isNegotiated = false  // Ensure this is false
@@ -154,27 +123,27 @@ class WebRTCService: NSObject, ObservableObject {
                 throw WebRTCError.peerConnectionFailed
             }
             
-            guard
-                let channel = peerConnection.dataChannel(
-                    forLabel: "KinoSync",
-                    configuration: dataChannelConfig
-                )
-            else {
-                throw WebRTCError.dataChannelFailed
-            }
-            
-            dataChannel = channel
+            dataChannel = peerConnection.dataChannel(
+                forLabel: "KinoSync",
+                configuration: dataChannelConfig
+            )
             dataChannel?.delegate = self
             
+            let config = RTCDataChannelConfiguration()
+            config.isOrdered = true
+            config.maxRetransmits = 0  // Reliable channel
+            config.channelId = 10  // Use different ID from main channel
+            fileChannel = peerConnection.dataChannel(forLabel: "fileChannel", configuration: config)
+            fileChannel?.delegate = self
+            
             RTCLogger.shared.log(
-                "DataChannel",
-        """
-        Created data channel:
-        Label: \(channel.label)
-        State: \(channel.readyState.rawValue)
-        IsOrdered: \(channel.isOrdered)
-        Delegate set: \(channel.delegate != nil)
-        """)
+                "Setup",
+                """
+                Created channels:
+                Sync: \(dataChannel!.label) (State: \(dataChannel!.readyState.rawValue))
+                File: \(fileChannel!.label) (State: \(fileChannel!.readyState.rawValue))
+                """
+            )
         } else {
             RTCLogger.shared.log("Setup", "Waiting for data channel as receiver")
         }
@@ -281,22 +250,23 @@ class WebRTCService: NSObject, ObservableObject {
     
     // Send player state through data channel
     func sendPlayerState(_ state: PlayerState) {
-        guard let dataChannel = dataChannel else {
-            RTCLogger.shared.log("DataChannel", "Cannot send state: data channel is nil")
+        
+        guard let channel = dataChannel, channel.label == "KinoSync" else {
+            RTCLogger.shared.log("PlayerSync", "Sync channel not available")
             return
         }
         
-        guard dataChannel.readyState == .open else {
+        guard channel.readyState == .open else {
             RTCLogger.shared.log(
                 "DataChannel",
-                "Cannot send state: data channel not open (state: \(dataChannel.readyState.rawValue))")
+                "Cannot send state: data channel not open (state: \(channel.readyState.rawValue))")
             return
         }
         
         do {
             let data = try JSONEncoder().encode(state)
             let buffer = RTCDataBuffer(data: data, isBinary: true)
-            dataChannel.sendData(buffer)
+            channel.sendData(buffer)
             RTCLogger.shared.log(
                 "DataChannel", "Sent player isPlaying: \(state.isPlaying) at position \(state.position)")
         } catch {
@@ -364,9 +334,18 @@ extension WebRTCService: RTCPeerConnectionDelegate {
       State: \(dataChannel.readyState.rawValue)
       IsOrdered: \(dataChannel.isOrdered)
       """)
-        self.dataChannel = dataChannel
+        
+        switch dataChannel.label {
+            case "KinoSync":
+                self.dataChannel = dataChannel
+            case "fileChannel":
+                self.fileChannel = dataChannel
+            default:
+                RTCLogger.shared.log("DataChannel", "Unknown channel label: \(dataChannel.label)")
+                return
+        }
+        
         dataChannel.delegate = self
-        RTCLogger.shared.log("DataChannel", "Delegate set for received channel")
     }
 }
 
@@ -374,8 +353,12 @@ extension WebRTCService: RTCPeerConnectionDelegate {
 extension WebRTCService: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
         DispatchQueue.main.async {
-            self.dataChannelState = dataChannel.readyState
-            self.isConnected = (dataChannel.readyState == .open)
+            if dataChannel.label == "KinoSync" {
+                self.dataChannelState = dataChannel.readyState
+                self.isConnected = (dataChannel.readyState == .open)
+            } else if dataChannel.label == "KinoFileStream" {
+                self.isConnected = (dataChannel.readyState == .open)
+            }
         }
         
         RTCLogger.shared.log(
@@ -392,15 +375,36 @@ extension WebRTCService: RTCDataChannelDelegate {
     }
     
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        if let data = try? JSONDecoder().decode(PlayerState.self, from: buffer.data) {
-            RTCLogger.shared.log(
-                "DataChannel", "Received player is Playing: \(data.isPlaying) at position \(data.position)"
-            )
-            DispatchQueue.main.async {
-                self.delegate?.webRTC(didReceivePlayerState: data)
+        RTCLogger.shared.log(
+            "DataChannel",
+            "Received message for \(dataChannel.label): \(buffer.data.count) bytes"
+        )
+        
+        switch dataChannel.label {
+        case "KinoSync":
+            guard let state = try? JSONDecoder().decode(PlayerState.self, from: buffer.data) else {
+                RTCLogger.shared.log("DataChannel", "Failed to decode player state")
+                return
             }
-        } else {
-            RTCLogger.shared.log("DataChannel", "Received message but failed to decode")
+            
+            RTCLogger.shared.log(
+                "DataChannel",
+                "Decoded player state - Playing: \(state.isPlaying) Position: \(state.position)"
+            )
+            
+            DispatchQueue.main.async {
+                self.delegate?.webRTC(didReceivePlayerState: state)
+            }
+        case "fileChannel":
+            guard let message = try? JSONDecoder().decode(FileStreamMessage.self, from: buffer.data) else {
+                RTCLogger.shared.log("DataChannel", "Failed to decode file message")
+                return
+            }
+            DispatchQueue.main.async {
+                self.delegate?.webRTC(didReceiveFileStream: message)
+            }
+        default:
+            RTCLogger.shared.log("DataChannel", "Unknown channel: \(dataChannel.label)")
         }
     }
 }
@@ -491,6 +495,18 @@ extension WebRTCService: SignalingServiceDelegate {
     }
 }
 
+extension WebRTCService {
+    func sendFileStream(_ message: FileStreamMessage) {
+        guard let data = try? JSONEncoder().encode(message) else { return }
+        
+        // Convert to RTCDataBuffer
+        let buffer = RTCDataBuffer(data: data, isBinary: true)
+        
+        // Send using the WebRTC data channel
+        fileChannel?.sendData(buffer)
+    }
+}
+
 // MARK: - Custom Errors
 enum WebRTCError: Error {
     case peerConnectionFailed
@@ -501,4 +517,5 @@ enum WebRTCError: Error {
 
 protocol WebRTCServiceDelegate {
     func webRTC(didReceivePlayerState state: PlayerState)
+    func webRTC(didReceiveFileStream message: FileStreamMessage)
 }

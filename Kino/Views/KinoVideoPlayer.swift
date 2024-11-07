@@ -7,6 +7,7 @@
 
 import SwiftUI
 import VLCKit
+import UniformTypeIdentifiers
 
 
 class VLCPlayerStateManager: NSObject, VLCMediaPlayerDelegate {
@@ -124,6 +125,10 @@ struct VideoControls: View {
     @Bindable var viewModel: KinoViewModel
     
     
+    @State private var showingFilePicker = false
+    @State private var isStreaming = false
+    
+    
     
     // Timer just for UI updates, not for sync
     let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
@@ -201,6 +206,41 @@ struct VideoControls: View {
                         }
                         .buttonStyle(.plain)
                         
+                        Button(action: {
+                            showingFilePicker = true
+                        }) {
+                            Image(systemName: isStreaming ? "rays" : "doc.badge.plus")
+                                .font(.system(size: 20))
+                                .frame(width: 36, height: 36)
+                                .background(KinoTheme.accent)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .fileImporter(
+                            isPresented: $showingFilePicker,
+                            allowedContentTypes: UTType.videoTypes
+                        ) { result in
+                            switch result {
+                            case .success(let url):
+                                let media = VLCMedia(url: url)
+                                media.addOptions([
+                                    "network-caching": "1500",
+                                    "live-caching": "1500",
+                                    "file-caching": "1500"
+                                ])
+                                player.media = media
+                                player.play()
+                                
+                                if url.startAccessingSecurityScopedResource() {
+                                    isStreaming = true
+                                    viewModel.roomViewModel.fileStreamManager.startStreaming(url: url)
+                                    url.stopAccessingSecurityScopedResource()
+                                }
+                            case .failure:
+                                break
+                            }
+                        }
+                        
                         // Time
                         Text(timeString)
                             .font(.system(size: 13, weight: .medium))
@@ -235,6 +275,20 @@ struct VideoControls: View {
             progress = player.position
             updateTimeString()
             isPlaying = player.isPlaying
+        }.onReceive(NotificationCenter.default.publisher(for: .streamingStarted)) { notification in
+            if let url = notification.userInfo?["url"] as? URL {
+                let media = VLCMedia(url: url)
+                media.addOptions([
+                    "network-caching": "1500",
+                    "live-caching": "1500",
+                    "file-caching": "1500"
+                ])
+                player.media = media
+                player.play()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .streamingEnded)) { _ in
+            isStreaming = false
         }
     }
 }
@@ -250,3 +304,23 @@ struct VLCPlayerView: NSViewRepresentable {
     
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
+
+extension UTType {
+    static var matroska: UTType {
+        UTType(importedAs: "org.matroska.mkv")
+    }
+    
+    static var videoTypes: [UTType] {
+        [
+            .movie,            // .mov
+            .video,            // General video
+            .mpeg4Movie,       // .mp4
+            .matroska,        // .mkv
+            .avi,             // .avi
+            UTType(filenameExtension: "mkv")!,  // Fallback for MKV
+            UTType(mimeType: "video/x-matroska")!, // Alternative MKV definition
+            UTType(mimeType: "video/webm")!,    // WebM (similar container)
+        ]
+    }
+}
+

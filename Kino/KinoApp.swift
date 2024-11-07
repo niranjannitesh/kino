@@ -30,6 +30,7 @@ enum KinoScreen {
 class RoomViewModel {
     private let webRTCService: WebRTCService
     private var lastSyncTime: TimeInterval = 0
+    let fileStreamManager: FileStreamManager
     var isInternalStateChange = false
 
     var roomCode: String = ""
@@ -39,6 +40,7 @@ class RoomViewModel {
 
     init() {
         webRTCService = WebRTCService()
+        fileStreamManager = FileStreamManager(webRTCService: webRTCService)
     }
 
     // Create a new room
